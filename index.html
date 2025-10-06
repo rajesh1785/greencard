@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pearl Immigration Portal Demo</title>
+    <!-- Load Inter font and Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        
+        :root {
+            --pearl-blue: #092C45; /* Darker, more corporate blue */
+            --pearl-orange: #F97316; /* Standard CTA orange */
+            --subtle-gray: #f9fafb; /* Very light background for sections */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--subtle-gray);
+            padding-top: 3rem; 
+            padding-bottom: 3rem;
+        }
+
+        .demo-container {
+            width: 100%;
+            max-width: 900px; /* This is the width we use for alignment */
+            margin: 20px auto; /* Centered horizontally */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            border-radius: 1rem;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
+        
+        /* Utility class for primary CTA (Orange, Filled) */
+        .btn-orange {
+            background-color: var(--pearl-orange); 
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 6px rgba(249, 115, 22, 0.3);
+        }
+        .btn-orange:hover {
+            background-color: #ea580c; /* Tailwind orange-600 */
+            transform: translateY(-1px);
+            box-shadow: 0 6px 10px rgba(249, 115, 22, 0.4);
+        }
+        
+        /* Secondary Outline CTA (Blue) */
+        .btn-outline-blue {
+            border: 2px solid var(--pearl-blue);
+            color: var(--pearl-blue);
+            background-color: white;
+            transition: all 0.2s ease;
+        }
+        .btn-outline-blue:hover {
+             background-color: #f0f4f7; /* Light blue background on hover (similar to blue-50) */
+        }
+        
+        .processing-overlay {
+            transition: opacity 0.5s ease-in-out;
+        }
+        
+        /* Animation for file upload simulation & chat messages */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        /* --- CHATBOT STYLES --- */
+        #chatbot-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px; /* Default: stick to viewport right edge on small screens */
+            z-index: 50;
+            display: none; 
+        }
+
+        /* Position the chatbot relative to the centered 900px content area 
+           This calc positions the LEFT edge of the chatbot button 20px past 
+           the right edge of the 900px content card.
+           50% (center) + 450px (half of 900px) + 20px (margin)
+        */
+        @media (min-width: 1000px) {
+            #chatbot-container {
+                right: auto; 
+                left: calc(50% + 450px + 20px); 
+            }
+        }
+
+
+        /* Minimized Button */
+        #chat-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 9999px; /* Full rounded */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            transition: transform 0.1s ease;
+            padding: 0; 
+            overflow: hidden; 
+        }
+        #chat-button:hover {
+            transform: scale(1.05);
+        }
+
+        /* Expanded Panel */
+        #chat-panel {
+            width: 320px;
+            height: 450px;
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transform: translateY(100%);
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+        }
+        
+        #chat-panel.open {
+            transform: translateY(0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+    </style>
+
+    <script>
+        // Global state for the demo
+        let currentScene = 1;
+        const totalScenes = 6;
+        
+        const DOCUMENTS = [
+            "Birth Certificate",
+            "Marriage Certificate",
+            "Passport Copy (Applicant)",
+            "Proof of U.S. Citizenship (Petitioner)",
+            "Financial Documents (I-864)",
+            "Passport Photos (2x2)"
+        ];
+        
+        // --- Avatar Constants ---
+        const AVATAR_ASSISTANT = 'https://ww2-secure.justanswer.com/static/img/val/pearl_as_a_bot_v2_64_64_3x.png';
+        const AVATAR_EXPERT = 'https://secure.justanswer.com/uploads/GS/gsenmartin/2024-7-2_72743_gsenmartin.100x100.jpg';
+
+        /**
+         * Determines which bot avatar URL to use based on the current scene ID.
+         * @param {number} sceneId - The current scene number.
+         * @returns {string} The appropriate avatar URL.
+         */
+        function getChatbotAvatarUrl(sceneId) {
+            // Scene 6 uses the Expert avatar (even if chat is hidden)
+            if (sceneId === 6) {
+                return AVATAR_EXPERT;
+            }
+            // Scenes 1-5 use the Assistant avatar 
+            return AVATAR_ASSISTANT;
+        }
+
+        // --- Chatbot State and Timer ---
+        let chatIsOpen = false;
+        const IDLE_TIME_MS = 15000; 
+        let idleTimer;
+
+        // Message structure: { sender: 'user' | 'bot', text: 'message content' }
+        let chatMessages = [];
+
+        // Function to control chat state
+        function toggleChat(forceState = undefined) {
+            // If a force state (true/false) is provided, use it
+            if (forceState !== undefined) {
+                chatIsOpen = forceState;
+            } else {
+                // Otherwise, toggle the current state
+                chatIsOpen = !chatIsOpen;
+            }
+            
+            const panel = document.getElementById('chat-panel');
+            panel.classList.toggle('open', chatIsOpen);
+            
+            if (chatIsOpen) {
+                // RENDER MESSAGES ONLY WHEN OPENING THE CHAT
+                renderChatMessages();
+                clearTimeout(idleTimer);
+            } else {
+                // Only restart the idle timer if we are in an active scene (1-4)
+                if (currentScene >= 1 && currentScene <= 4) {
+                    startIdleTimer();
+                }
+            }
+        }
+
+        // --- Core UI Management ---
+
+        function updateUI() {
+            const scenes = document.querySelectorAll('.scene');
+            scenes.forEach(scene => {
+                const sceneNumber = parseInt(scene.getAttribute('data-scene'));
+                scene.classList.add('hidden');
+                
+                if (sceneNumber === currentScene) {
+                    scene.classList.remove('hidden');
+                    if (sceneNumber === 3) {
+                        simulateScene3Upload();
+                    } 
+                }
+            });
+            
+            // Update step indicator
+            const steps = document.querySelectorAll('.step-indicator');
+            const stepLabels = document.querySelectorAll('.step-label');
+            
+            steps.forEach(step => {
+                const stepNum = parseInt(step.getAttribute('data-step'));
+                step.classList.remove('bg-[var(--pearl-blue)]', 'bg-gray-300');
+                step.classList.add(stepNum <= currentScene ? 'bg-[var(--pearl-blue)]' : 'bg-gray-300');
+            });
+
+            stepLabels.forEach(label => {
+                const stepNum = parseInt(label.getAttribute('data-step'));
+                
+                // 1. Remove all potential status classes first
+                label.classList.remove('font-semibold', 'text-[var(--pearl-blue)]', 'text-gray-500');
+
+                // 2. Apply the correct status classes
+                if (stepNum === currentScene) {
+                    label.classList.add('font-semibold', 'text-[var(--pearl-blue)]'); 
+                } else {
+                    label.classList.add('text-gray-500');
+                }
+            });
+
+            // Update scene counter
+            document.getElementById('current-scene-display').textContent = currentScene;
+            // The back button is hidden on the first scene (1)
+            document.getElementById('back-btn').style.visibility = currentScene > 1 && currentScene <= totalScenes ? 'visible' : 'hidden'; 
+            
+            
+            // --- Chatbot Title & Avatar Update ---
+            const chatTitleElement = document.getElementById('chat-title-text');
+            const minimizedAvatar = document.getElementById('minimized-avatar');
+            const headerAvatar = document.getElementById('header-avatar');
+            const avatarUrl = getChatbotAvatarUrl(currentScene);
+
+            let title = "Pearl Expert"; 
+            if (currentScene >= 1 && currentScene <= 4) {
+                title = "Pearl Assistant";
+            }
+            if (chatTitleElement) {
+                chatTitleElement.textContent = title;
+            }
+            
+            // Apply the correct avatar URL based on the scene
+            if (minimizedAvatar && headerAvatar) {
+                minimizedAvatar.src = avatarUrl;
+                headerAvatar.src = avatarUrl;
+            }
+            
+            // --- CHAT RESET LOGIC: Clears history and sets new greeting on every scene change ---
+            chatMessages = [];
+            let initialGreeting = "";
+
+            if (currentScene >= 1 && currentScene <= 4) {
+                // Scenes 1-4: Pearl Assistant is active
+                initialGreeting = "Welcome! I'm your <b>Pearl Assistant</b>. How can I help you with the current step of your application?";
+            } else if (currentScene === 6) {
+                // Scene 6: Expert is available upon request (will be triggered by openChat)
+                initialGreeting = "Hello! I am your <b>Pearl Expert</b> How can I assist you further with your confirmed submission?";
+            }
+
+            // Add the initial message to the now empty array
+            if (initialGreeting) {
+                chatMessages.push({ sender: 'bot', text: initialGreeting });
+            }
+
+            // Close chat panel and clear timer on all scene transitions
+            toggleChat(false);
+            clearTimeout(idleTimer);
+
+
+            // --- Chatbot Visibility Control ---
+            const chatContainer = document.getElementById('chatbot-container');
+            
+            // Show the floating chat only for scenes 1-4 (Assistant phase).
+            // It is hidden for Scene 5 (Payment) and Scene 6 (Confirmation, unless clicked).
+            const initiallyVisible = currentScene >= 1 && currentScene <= 4;
+            
+            chatContainer.style.display = initiallyVisible ? 'block' : 'none';
+
+            if (initiallyVisible) {
+                // If the assistant is visible (Scenes 1-4), restart the idle timer to prompt conversation.
+                startIdleTimer();
+            }
+        }
+
+        function advanceScene() {
+            // === Auto-minimize logic for user interaction on scenes 1-4 ===
+            if (currentScene >= 1 && currentScene <= 4 && chatIsOpen) {
+                toggleChat(false); 
+            }
+
+            if (currentScene < totalScenes) {
+                currentScene++;
+            }
+            updateUI();
+        }
+        
+        function goBack() {
+             if (currentScene > 1) {
+                currentScene--;
+                updateUI();
+            }
+        }
+        
+        // --- Scene Specific Logic (Upload and Validation Simulation) ---
+        
+        function simulateScene3Upload() {
+            const uploadList = document.getElementById('upload-list');
+            const nextButton = document.getElementById('scene3-next-button');
+
+            // Reset state
+            uploadList.innerHTML = '';
+            nextButton.textContent = 'Uploading...';
+            nextButton.onclick = null;
+            nextButton.classList.add('opacity-50', 'pointer-events-none');
+            nextButton.classList.remove('ring-4', 'ring-orange-300');
+            document.getElementById('processing-overlay').classList.add('hidden');
+            
+            const uploadedItems = []; 
+            let fileCount = 0;
+
+            const uploadInterval = setInterval(() => {
+                if (fileCount < DOCUMENTS.length) {
+                    const filename = DOCUMENTS[fileCount].replace(/[^a-zA-Z0-9]/g, '') + '.pdf';
+                    
+                    const item = document.createElement('div');
+                    item.className = 'flex file-item items-center justify-between p-3 text-sm text-gray-800 bg-white border border-gray-200 rounded-lg shadow-sm animate-fadeIn';
+                    item.innerHTML = `
+                        <div class="flex items-center">
+                            <svg class="w-5 h-5 text-blue-600 file-icon mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <span class="truncate">${filename}</span>
+                        </div>
+                        <span class="text-xs font-medium text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full validation-badge">Uploaded</span>
+                    `;
+                    uploadList.appendChild(item);
+                    uploadedItems.push(item);
+                    fileCount++;
+                } else {
+                    clearInterval(uploadInterval);
+                    nextButton.textContent = 'Validate Documents';
+                    // This button click still triggers advanceScene() eventually, but via handleValidationStart
+                    nextButton.onclick = () => handleValidationStart(uploadedItems); 
+                    nextButton.classList.remove('opacity-50', 'pointer-events-none');
+                    nextButton.classList.add('ring-4', 'ring-orange-300');
+                }
+            }, 300);
+        }
+
+        function handleValidationStart(uploadedItems) {
+            const processingOverlay = document.getElementById('processing-overlay');
+            const nextButton = document.getElementById('scene3-next-button');
+
+            nextButton.classList.add('opacity-50', 'pointer-events-none');
+            nextButton.classList.remove('ring-4', 'ring-orange-300');
+            nextButton.textContent = 'Validating...';
+
+            processingOverlay.classList.remove('hidden');
+            
+            setTimeout(() => {
+                processingOverlay.classList.add('hidden');
+                
+                uploadedItems.forEach(item => {
+                    const badge = item.querySelector('.validation-badge');
+                    const icon = item.querySelector('.file-icon');
+                    
+                    badge.textContent = 'Validated';
+                    badge.classList.remove('bg-blue-100', 'text-blue-700');
+                    badge.classList.add('bg-green-100', 'text-green-700');
+                    
+                    icon.classList.remove('text-blue-600');
+                    icon.classList.add('text-green-600');
+                    icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
+                });
+
+                nextButton.textContent = 'Proceed to Form Review';
+                nextButton.onclick = advanceScene; // This calls advanceScene, triggering the auto-minimize logic.
+                nextButton.classList.remove('opacity-50', 'pointer-events-none');
+                nextButton.classList.add('ring-4', 'ring-orange-300');
+
+            }, 2000);
+        }
+
+        // --- Chatbot Logic ---
+        
+        function openChat() {
+            // When user clicks 'Talk to Expert' in Scene 6, we must force the container visible.
+            const chatContainer = document.getElementById('chatbot-container');
+            if (chatContainer.style.display === 'none') {
+                 chatContainer.style.display = 'block';
+            }
+            
+            // The message array is already pre-loaded with the correct greeting by updateUI()
+            
+            if (!chatIsOpen) {
+                toggleChat(true); // Force open, which calls renderChatMessages()
+                clearTimeout(idleTimer); 
+            }
+        }
+
+        function renderChatMessages() {
+            const container = document.getElementById('chat-messages-container');
+            if (!container) return; 
+
+            container.innerHTML = '';
+            
+            chatMessages.forEach(msg => {
+                const isBot = msg.sender === 'bot';
+                const msgClass = isBot 
+                    ? 'justify-start' 
+                    : 'justify-end';
+                const bubbleClass = isBot 
+                    ? 'bg-gray-100 text-gray-800 rounded-tl-none border border-gray-200' 
+                    : 'bg-[var(--pearl-blue)] text-white rounded-br-none';
+
+                const msgElement = document.createElement('div');
+                msgElement.className = `flex ${msgClass}`;
+                msgElement.innerHTML = `
+                    <div class="max-w-[85%] p-3 rounded-xl shadow-md text-sm ${bubbleClass} animate-fadeIn">
+                        ${msg.text}
+                    </div>
+                `;
+                container.appendChild(msgElement);
+            });
+            
+            // Scroll to the bottom if the chat is currently open
+            if (chatIsOpen) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function handleChatSend() {
+            const input = document.getElementById('chat-input-global');
+            const messageText = input.value.trim();
+            
+            if (messageText === '') return;
+            
+            // 1. Add user message
+            chatMessages.push({ sender: 'user', text: messageText });
+            input.value = ''; // Clear input
+            renderChatMessages();
+
+            // 2. Simulate Expert response
+            setTimeout(() => {
+                let response = "Thank you for your question. We are monitoring your case status closely and will notify you of any new developments, such as biometrics appointments or RFE notices.";
+                if (messageText.toLowerCase().includes('timeline') || messageText.toLowerCase().includes('estimated')) {
+                     response = "Based on current service center volume, the estimated time for your initial petition review is 10 to 14 months. We will keep you fully informed!";
+                } else if (messageText.toLowerCase().includes('payment')) {
+                     response = "Your service payment has been successfully processed and is applied to the e-filing preparation fee. No further action is required for payment.";
+                } else if (messageText.toLowerCase().includes('document') || messageText.toLowerCase().includes('upload')) {
+                    response = "You have successfully uploaded 6 required documents. The system verified all documents in Scene 3. Please refer back to Scene 4 for the final petition review.";
+                }
+                
+                chatMessages.push({ sender: 'bot', text: response });
+                renderChatMessages();
+            }, 1500); // 1.5 second delay for expert typing simulation
+            
+            resetIdleTimer(); // Treat sending a message as activity
+        }
+        
+        // --- Idle Timer Logic ---
+        function startIdleTimer() {
+            clearTimeout(idleTimer);
+            // Only start timer if we are in the active scene range (1-4)
+            if (!chatIsOpen && currentScene >= 1 && currentScene <= 4) {
+                idleTimer = setTimeout(() => {
+                     // Only open if the scene hasn't changed since the timer started
+                    if (currentScene >= 1 && currentScene <= 4) {
+                        openChat();
+                    }
+                }, IDLE_TIME_MS);
+            }
+        }
+
+        function resetIdleTimer() {
+            clearTimeout(idleTimer);
+             // Only reset/start timer if we are in the active scene range (1-4)
+            if (!chatIsOpen && currentScene >= 1 && currentScene <= 4) {
+                startIdleTimer();
+            }
+        }
+
+
+        // --- Initialization ---
+
+        window.onload = () => {
+            updateUI();
+            
+            // Setup the Back button action
+            document.getElementById('back-btn').addEventListener('click', goBack);
+            
+            // Add global listeners for activity (for idle timer in scenes 1-4)
+            document.addEventListener('mousemove', resetIdleTimer);
+            document.addEventListener('keypress', resetIdleTimer);
+            document.addEventListener('scroll', resetIdleTimer);
+        };
+    </script>
+</head>
+<body>
+
+    <!-- Hero Image Section -->
+    <div class="w-full max-w-5xl mx-auto rounded-xl shadow-xl mb-10 overflow-hidden hidden md:block">
+        <img src="https://ww2-secure.justanswer.com/static/ja36640/btc_immigration_law.jpg" 
+             alt="Immigration Law Office" 
+             class="w-full object-cover h-[16rem] object-top"
+             onerror="this.onerror=null; this.src='https://placehold.co/1000x512/092C45/ffffff?font=Inter&text=Immigration+Consultation'">
+    </div>
+
+    <div class="demo-container bg-white" id="welcome-card">
+        
+        <!-- Header & Step Indicator -->
+        <header class="p-6 bg-white border-b border-gray-200">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-2xl font-bold text-[var(--pearl-blue)] flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-[var(--pearl-orange)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-1.472 3-3.286v-3.428C15 10.472 13.657 9 12 9s-3 1.472-3 3.286v3.428C9 19.528 10.343 21 12 21z"></path></svg>
+                    Pearl Immigration Portal
+                </h1>
+                <span id="back-btn" class="flex items-center text-sm font-medium text-gray-700 cursor-pointer hover:text-gray-900 transition" style="visibility: hidden;">
+                     <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                     Back
+                </span>
+            </div>
+            
+            <div class="grid grid-cols-6 gap-4">
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="1"></div>
+                    <p class="text-xs mt-2 step-label" data-step="1">Start</p>
+                </div>
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="2"></div>
+                    <p class="text-xs mt-2 step-label" data-step="2">Required</p>
+                </div>
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="3"></div>
+                    <p class="text-xs mt-2 step-label" data-step="3">Upload</p>
+                </div>
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="4"></div>
+                    <p class="text-xs mt-2 step-label" data-step="4">Review</p>
+                </div>
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="5"></div>
+                    <p class="text-xs mt-2 step-label" data-step="5">Pay</p>
+                </div>
+                <!-- NEW STEP 6: Final Confirmation -->
+                <div class="text-center">
+                    <div class="h-1 rounded-full step-indicator" data-step="6"></div>
+                    <p class="text-xs mt-2 step-label" data-step="6">Confirm</p>
+                </div>
+            </div>
+            <p class="text-sm text-gray-500 mt-4 text-center">Step <span id="current-scene-display"></span> of 6</p>
+        </header>
+
+
+        <!-- SCENE 1: Application Type Selection -->
+        <section class="scene p-10 transition-opacity duration-500 bg-white" data-scene="1">
+            <h2 class="text-3xl md:text-4xl font-extrabold text-center text-gray-900 mb-4">Identify Your Petition Type</h2>
+            <p class="text-md text-center text-gray-600 mb-12 max-w-2xl mx-auto">Please select the relationship type for the alien relative you are petitioning (Form I-130).</p>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto">
+                <div id="spouse-option" 
+                     onclick="advanceScene()"
+                     class="group flex flex-col items-center p-6 bg-white border border-gray-200 rounded-xl shadow-lg hover:shadow-xl cursor-pointer transition-all duration-300 ease-out transform hover:scale-[1.02] hover:border-[var(--pearl-blue)]">
+                    <svg class="w-10 h-10 mb-3 text-[var(--pearl-orange)] group-hover:text-[var(--pearl-blue)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M12 20.577C12 17.5 14.5 15 17.5 15S23 17.5 23 20.577M12 14a7 7 0 00-7 7v1h14v-1a7 7 0 00-7-7z"></path></svg>
+                    <span class="text-lg font-semibold text-gray-800 group-hover:text-[var(--pearl-blue)]">Spouse</span>
+                    <span class="text-xs text-gray-500 mt-1">(Immediate Relative)</span>
+                </div>
+                
+                <div class="flex flex-col items-center p-6 bg-gray-50 border border-gray-200 rounded-xl shadow-md opacity-70 cursor-not-allowed">
+                    <svg class="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H4a2 2 0 01-2-2v-2a3 3 0 005.356-1.857M20 10V8a2 2 0 00-2-2h-2M13 14h-2m-2-4h4m-2 2h2m0 0l2 2m-2-2h2m0 0l-2 2"></path></svg>
+                    <span class="text-lg font-semibold text-gray-600">Parent</span>
+                    <span class="text-xs text-gray-400 mt-1">(F1/IR)</span>
+                </div>
+                
+                <div class="flex flex-col items-center p-6 bg-gray-50 border border-gray-200 rounded-xl shadow-md opacity-70 cursor-not-allowed">
+                    <svg class="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3M6 18h2m-2 4h4m-4-2h4m-4 2h4m-4 2h4M4 4h4a4 4 0 014 4v4a4 4 0 01-4 4H4z"></path></svg>
+                    <span class="text-lg font-semibold text-gray-600">Brother/Sister</span>
+                    <span class="text-xs text-gray-400 mt-1">(F4)</span>
+                </div>
+
+                <div class="flex flex-col items-center p-6 bg-gray-50 border border-gray-200 rounded-xl shadow-md opacity-70 cursor-not-allowed">
+                    <svg class="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c1.657 0 3 .895 3 2s-1.343 2-3 2a3 3 0 00-3 2c0 1.105 1.343 2 3 2s3 .895 3 2"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14c-1.657 0-3 .895-3 2s1.343 2 3 2a3 3 0 003 2c0 1.105 1.343 2 3 2s3 .895 3 2"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4a3 3 0 100 6 3 3 0 000-6z"></path></svg>
+                    <span class="text-lg font-semibold text-gray-600">Child</span>
+                    <span class="text-xs text-gray-400 mt-1">(F1/F3/IR)</span>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- SCENE 2: Document Requirements List -->
+        <section class="scene hidden p-10 transition-opacity duration-500 bg-white" data-scene="2">
+            <h2 class="text-3xl font-bold text-gray-900 mb-4">Gather Your Required Documents</h2>
+            <p class="text-gray-600 mb-8">Based on your selection, please ensure you have the following documents ready for upload. Original copies are preferred.</p>
+            
+            <div class="grid md:grid-cols-2 gap-4 border border-gray-200 p-6 rounded-xl bg-gray-50">
+                <!-- Document List Column -->
+                <div class="space-y-4">
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <span class="font-medium text-gray-800">Birth Certificate</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                        <span class="font-medium text-gray-800">Marriage Certificate</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h4m0 0v4m0-4L10 10"></path></svg>
+                        <span class="font-medium text-gray-800">Passport Copy (Applicant)</span>
+                    </div>
+                </div>
+                <!-- Document List Column 2 -->
+                <div class="space-y-4">
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <span class="font-medium text-gray-800">Proof of U.S. Citizenship (Petitioner)</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        <span class="font-medium text-gray-800">Financial Documents (I-864)</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <svg class="w-6 h-6 text-[var(--pearl-orange)] mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <span class="font-medium text-gray-800">Passport Photos (2x2)</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-10 pt-6 border-t border-gray-100 flex justify-end">
+                <button onclick="advanceScene()" class="px-10 py-3 text-lg font-semibold text-white btn-orange rounded-full shadow-lg transition transform">
+                    Continue to Document Upload
+                </button>
+            </div>
+        </section>
+
+
+        <!-- SCENE 3: Document Upload Simulation & Processing -->
+        <section class="scene hidden p-10 transition-opacity duration-500 relative bg-white" data-scene="3">
+            <h2 class="text-3xl font-bold text-gray-900 mb-4">Secure Document Upload & Validation</h2>
+            <p class="text-gray-600 mb-8">Files are uploaded securely, scanned for quality, and data is extracted to automatically fill your forms.</p>
+
+            <div class="flex flex-col md:flex-row gap-8">
+                <!-- File Picker Simulation -->
+                <div class="md:w-1/3 p-6 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center h-64 text-center">
+                    <svg class="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    <p class="text-sm font-medium text-gray-700">Drop Files Here</p>
+                    <p class="text-xs text-gray-500 mt-1">or click to browse local files.</p>
+                </div>
+                
+                <!-- Upload List -->
+                <div class="md:w-2/3 space-y-4">
+                    <h3 class="text-xl font-semibold text-gray-700 border-b pb-2">Completed Uploads:</h3>
+                    <div id="upload-list" class="space-y-3">
+                        <!-- Uploaded files will appear here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-10 pt-6 border-t border-gray-100 flex justify-end">
+                <button id="scene3-next-button" 
+                        class="px-10 py-3 text-lg font-semibold text-white btn-orange rounded-full shadow-lg transition opacity-50 pointer-events-none transform">
+                    Uploading...
+                </button>
+            </div>
+            
+            <!-- Processing Overlay -->
+            <div id="processing-overlay" class="absolute inset-0 bg-white bg-opacity-95 flex flex-col items-center justify-center hidden processing-overlay rounded-xl">
+                <svg class="animate-spin h-12 w-12 text-[var(--pearl-blue)] mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-xl font-semibold text-gray-800">Processing & Auto-Filling Forms...</p>
+                <p class="text-md text-gray-500 mt-1">Reviewing files for data consistency and integrity.</p>
+            </div>
+
+        </section>
+
+
+        <!-- SCENE 4: Summary & Action Buttons -->
+        <section class="scene hidden p-10 transition-opacity duration-500 bg-white" data-scene="4">
+            <h2 class="text-3xl font-bold text-gray-900 mb-4">Final Petition Review</h2>
+            <p class="text-gray-600 mb-8">Your petition (Form I-130) has been fully drafted and validated against USCIS requirements.</p>
+
+            <!-- Summary Card -->
+            <div class="bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-md mb-8">
+                <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Case Overview: I-130 (Spouse)</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="text-sm">
+                        <p class="text-gray-500">Applicant (Beneficiary):</p>
+                        <p class="font-medium text-gray-900">Jane D. Doe</p>
+                    </div>
+                    <div class="text-sm">
+                        <p class="text-gray-500">Petitioner (Sponsor):</p>
+                        <p class="font-medium text-gray-900">John M. Smith (U.S. Citizen)</p>
+                    </div>
+                    <div class="text-sm">
+                        <p class="text-gray-500">Form Generated:</p>
+                        <p class="font-medium text-gray-900">I-130 Petition for Alien Relative</p>
+                    </div>
+                    <div class="text-sm">
+                        <p class="text-gray-500">Document Count:</p>
+                        <p class="font-medium text-gray-900">6 of 6 Required</p>
+                    </div>
+                    <div class="text-sm md:col-span-2">
+                        <p class="text-gray-500">System Validation:</p>
+                        <p class="font-bold text-lg text-green-700 flex items-center">
+                            <svg class="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Complete and Ready for Submission
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-10 pt-6 border-t border-gray-100 flex flex-col md:flex-row justify-end gap-4">
+                <!-- First Button: Secondary Outline Blue (Download) -->
+                <button class="px-8 py-3 text-lg font-semibold btn-outline-blue rounded-full shadow-md transition">
+                    <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Download Draft I-130
+                </button>
+
+                <!-- Second Button: Primary Orange (Authorize Submission) -->
+                <button id="pay-button" onclick="advanceScene()" class="px-8 py-3 text-lg font-semibold text-white btn-orange rounded-full shadow-lg transition transform">
+                    <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.101A12.016 12.016 0 0012 4c-5.401 0-9.75 4.004-9.963 9.387c-.147 3.013 1.134 5.968 3.56 8.24c.731.694 1.547 1.328 2.41 1.865l.775.409c1.478.784 3.09 1.17 4.708 1.17h.001a11.978 11.978 0 005.122-1.789c3.013-1.638 5.166-4.992 5.166-8.736v-1.698c0-2.485-1.12-4.743-2.924-6.364"></path></svg>
+                    Authorize Submission
+                </button>
+            </div>
+        </section>
+
+
+        <!-- SCENE 5: Payment Page (Floating Chat Hidden) -->
+        <section class="scene hidden p-10 transition-opacity duration-500 bg-white" data-scene="5">
+            <h2 class="text-3xl font-bold text-gray-900 mb-4 text-center">Payment for Pearl Services</h2>
+            <p class="text-xl font-medium text-center text-gray-700 mb-8">Securely process your service fee to unlock final e-filing.</p>
+            
+            <div class="max-w-md mx-auto bg-gray-50 p-8 border border-gray-200 rounded-xl shadow-2xl">
+                <div class="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+                    <span class="text-lg font-semibold text-gray-800">Total Due:</span>
+                    <span class="text-2xl font-extrabold text-[var(--pearl-blue)]">$499.00</span>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label for="card-number" class="block text-sm font-medium text-gray-700 mb-1">Card Number</label>
+                        <input type="text" id="card-number" value="**** **** **** 4242" readonly class="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg font-mono bg-white shadow-inner">
+                    </div>
+                    <div>
+                        <label for="card-holder" class="block text-sm font-medium text-gray-700 mb-1">Card Holder Name</label>
+                        <input type="text" id="card-holder" value="JOHN M. SMITH" readonly class="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg bg-white shadow-inner">
+                    </div>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="col-span-2">
+                            <label for="expiry-date" class="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                            <input type="text" id="expiry-date" value="08 / 28" readonly class="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg bg-white shadow-inner">
+                        </div>
+                        <div>
+                            <label for="cvv" class="block text-sm font-medium text-gray-700 mb-1">CVV</label>
+                            <input type="text" id="cvv" value="***" readonly class="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg bg-white shadow-inner">
+                        </div>
+                    </div>
+                </div>
+                
+                <button onclick="advanceScene()" class="w-full mt-8 px-4 py-3 text-xl font-bold text-white btn-orange rounded-lg shadow-xl transition transform">
+                    Complete Payment ($499.00)
+                </button>
+                
+                <p class="text-xs text-center text-gray-400 mt-4 flex items-center justify-center">
+                    <svg class="w-4 h-4 mr-1 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                    SSL Secure Connection
+                </p>
+            </div>
+            
+        </section>
+
+
+        <!-- SCENE 6: Final Confirmation / Success (Floating Chat Hidden, Manual Button to open) -->
+        <section class="scene hidden p-10 transition-opacity duration-500 bg-white" data-scene="6">
+            <div class="max-w-xl mx-auto text-center py-10">
+                <svg class="w-20 h-20 text-green-500 mx-auto mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <h2 class="text-4xl font-extrabold text-gray-900 mb-4">Submission Confirmed!</h2>
+                <p class="text-xl font-medium text-gray-700 mb-8">Your I-130 Petition is now securely filed with USCIS and your Pearl Expert fee is paid.</p>
+                
+                <p class="text-gray-600 mb-8">
+                    You are now in the case monitoring phase. You will receive updates directly here in your portal.
+                    <br class="hidden md:inline">For immediate questions, use the <b>Talk to Expert</b> button below. 
+                </p>
+
+                <!-- Scene 6 Button: "Talk to Expert" and primary orange -->
+                <button onclick="openChat()" class="px-8 py-3 text-lg font-semibold text-white btn-orange rounded-full shadow-lg transition transform hover:scale-[1.02]">
+                    <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.155C5.12 15.676 6 13.84 6 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                    Talk to Expert
+                </button>
+            </div>
+        </section>
+
+    </div>
+    
+    <!-- --- FLOATING CHATBOT CONTAINER --- -->
+    <div id="chatbot-container">
+        
+        <!-- Minimized Chat Button -->
+        <button id="chat-button" 
+                onclick="toggleChat()" 
+                class="btn-orange">
+            <!-- Dynamic Avatar Source - Updated classes to w-full h-full object-cover -->
+            <img src="" 
+                 alt="Pearl Chat Avatar" 
+                 class="w-full h-full rounded-full object-cover" 
+                 id="minimized-avatar"
+                 onerror="this.onerror=null; this.src='https://placehold.co/60x60/F97316/ffffff?text=P'"/> 
+        </button>
+        
+        <!-- Expanded Chat Panel (Initially Hidden/Minimised) -->
+        <div id="chat-panel" class="absolute bottom-0 right-0">
+            <!-- Chat Header -->
+            <div class="bg-[var(--pearl-blue)] text-white p-3 flex items-center justify-between shadow-md">
+                <span class="font-semibold flex items-center" id="chat-title-display">
+                    <!-- Dynamic Avatar Source - Initialized by JS -->
+                    <img src="" 
+                         alt="Pearl Chat Avatar" 
+                         class="w-6 h-6 mr-2 rounded-full"
+                         id="header-avatar"
+                         onerror="this.onerror=null; this.src='https://placehold.co/24x24/092C45/ffffff?text=P'"/>
+                    <!-- Dynamic Title Placeholder -->
+                    <span id="chat-title-text">Pearl Expert</span> 
+                </span>
+                <button onclick="toggleChat()" class="p-1 rounded-full hover:bg-white hover:bg-opacity-20 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <!-- Chat Messages Container -->
+            <div id="chat-messages-container" class="flex-1 p-4 overflow-y-auto space-y-4">
+                <!-- Messages will be dynamically added here -->
+            </div>
+
+            <!-- Chat Input -->
+            <div class="p-3 border-t border-gray-200 flex space-x-2 bg-gray-50">
+                <input type="text" id="chat-input-global" 
+                       onkeypress="if(event.key === 'Enter') handleChatSend()"
+                       placeholder="Ask a question..." 
+                       class="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-[var(--pearl-orange)] focus:border-[var(--pearl-orange)]">
+                <button onclick="handleChatSend()" class="px-3 py-2 text-white btn-orange rounded-lg font-semibold flex items-center justify-center">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7-7 7"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Webpage Footer -->
+    <footer class="mt-10 p-6 text-center text-gray-700 text-sm w-full max-w-5xl mx-auto bg-blue-50 rounded-xl shadow-lg border-t border-blue-200">
+        &copy; 2025 Pearl Immigration Portal. All rights reserved.
+    </footer>
+</body>
+</html>
